@@ -1,0 +1,17 @@
+{
+  "name": "english-learning-server-simple",
+  "version": "1.0.0",
+  "description": "英语单词学习后端服务（简化版）",
+  "main": "server-simple.js",
+  "scripts": {
+    "start": "node server-simple.js",
+    "test": "echo \"Simple server, no test specified\" && exit 1"
+  },
+  "keywords": ["english", "learning", "vocabulary", "backend", "api", "simple"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
