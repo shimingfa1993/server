@@ -1,23 +1,58 @@
+#!/bin/bash
+
+# 创建server-https.js文件到服务器
+echo "🔧 创建server-https.js文件..."
+
+PROJECT_DIR="/www/english-learning-api"
+cd $PROJECT_DIR
+
+# 创建server-https.js文件
+cat > server-https.js << 'EOF'
 const express = require('express');
+const https = require('https');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-
-// 加载环境变量（如果 dotenv 包可用）
+// 加载环境变量
 try {
   require('dotenv').config();
 } catch (e) {
   console.log('dotenv not found, using default values');
 }
 
+const app = express();
+const HTTP_PORT = process.env.HTTP_PORT || 80;
+const HTTPS_PORT = process.env.HTTPS_PORT || 443;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
+// SSL证书路径
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH || '/etc/ssl/lengthwords/lengthwords.top.key';
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '/etc/ssl/lengthwords/lengthwords.top.pem';
+
 // 中间件
-app.use(cors());
+app.use(cors({
+  origin: ['https://lengthwords.top', 'https://www.lengthwords.top', 'http://localhost:3000'],
+  credentials: true
+}));
 app.use(express.json());
+
+// 强制HTTPS重定向中间件
+const forceHTTPS = (req, res, next) => {
+  if (!req.secure && req.get('x-forwarded-proto') !== 'https') {
+    return res.redirect(301, `https://${req.get('host')}${req.url}`);
+  }
+  next();
+};
+
+// 在生产环境中使用HTTPS重定向
+if (process.env.NODE_ENV === 'production') {
+  app.use(forceHTTPS);
+}
 
 // 初始化数据库
 const db = new sqlite3.Database('learning.db');
@@ -60,9 +95,11 @@ db.serialize(() => {
 // 测试路由
 app.get('/api/test', (req, res) => {
   res.json({ 
-    message: '🎉 服务器运行正常！', 
+    message: '🎉 HTTPS服务器运行正常！', 
     timestamp: new Date().toISOString(),
-    server: 'English Learning API',
+    server: 'English Learning API with SSL',
+    protocol: req.secure ? 'HTTPS' : 'HTTP',
+    host: req.get('host'),
     availableRoutes: [
       'POST /api/register',
       'POST /api/login', 
@@ -340,10 +377,83 @@ app.post('/api/learning/review-result', authenticateToken, (req, res) => {
   );
 });
 
+// 启动服务器函数
+function startServers() {
+  try {
+    // 检查SSL证书文件是否存在
+    if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
+      // 读取SSL证书
+      const privateKey = fs.readFileSync(SSL_KEY_PATH, 'utf8');
+      const certificate = fs.readFileSync(SSL_CERT_PATH, 'utf8');
+      const credentials = { key: privateKey, cert: certificate };
+
+      // 创建HTTPS服务器
+      const httpsServer = https.createServer(credentials, app);
+      httpsServer.listen(HTTPS_PORT, () => {
+        console.log('🔒 HTTPS服务器启动成功！');
+        console.log(`📍 HTTPS端口: ${HTTPS_PORT}`);
+        console.log(`🔗 HTTPS测试地址: https://lengthwords.top/api/test`);
+      });
+
+      // 创建HTTP服务器用于重定向到HTTPS
+      const httpApp = express();
+      httpApp.use('*', (req, res) => {
+        res.redirect(301, `https://${req.headers.host}${req.url}`);
+      });
+      
+      const httpServer = http.createServer(httpApp);
+      httpServer.listen(HTTP_PORT, () => {
+        console.log(`🔄 HTTP重定向服务器启动成功！端口: ${HTTP_PORT}`);
+      });
+
+    } else {
+      console.log('⚠️  SSL证书文件未找到，启动HTTP服务器...');
+      console.log(`SSL密钥路径: ${SSL_KEY_PATH}`);
+      console.log(`SSL证书路径: ${SSL_CERT_PATH}`);
+      
+      // 如果没有SSL证书，则启动HTTP服务器
+      const httpServer = http.createServer(app);
+      httpServer.listen(HTTP_PORT, () => {
+        console.log('🌐 HTTP服务器启动成功！');
+        console.log(`📍 HTTP端口: ${HTTP_PORT}`);
+        console.log(`🔗 测试地址: http://localhost:${HTTP_PORT}/api/test`);
+      });
+    }
+  } catch (error) {
+    console.error('❌ 服务器启动失败:', error);
+    process.exit(1);
+  }
+}
+
 // 启动服务器
-app.listen(PORT, () => {
-  console.log(`🚀 服务器启动成功！`);
-  console.log(`📍 端口: ${PORT}`);
-  console.log(`🔗 测试地址: http://localhost:${PORT}/api/test`);
-  console.log(`📊 状态: 运行中...`);
-});
+startServers();
+
+console.log('📊 服务器状态: 运行中...');
+console.log('🎯 域名: lengthwords.top');
+console.log('📱 支持小程序HTTPS请求');
+EOF
+
+echo "✅ server-https.js 文件创建完成！"
+
+# 设置文件权限
+chmod 644 server-https.js
+
+echo "📁 文件位置: $PROJECT_DIR/server-https.js"
+echo "📝 文件大小: $(ls -lh server-https.js | awk '{print $5}')"
+
+echo ""
+echo "🚀 下一步操作："
+echo "1. 删除错误的PM2服务"
+echo "   pm2 delete english-learning-https"
+echo ""
+echo "2. 重新启动HTTPS服务"
+echo "   pm2 start server-https.js --name english-learning-https --env production"
+echo ""
+echo "3. 查看服务状态"
+echo "   pm2 status"
+echo ""
+echo "4. 测试HTTPS连接"
+echo "   curl -k https://lengthwords.top/api/test"
+
+echo ""
+echo "🎉 server-https.js 文件已准备就绪！"
